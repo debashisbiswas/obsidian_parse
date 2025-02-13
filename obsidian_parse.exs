@@ -4,6 +4,33 @@ Mix.install([
   {:mdex, "~> 0.3.3"}
 ])
 
+defmodule GraphNode do
+  defstruct [:name]
+  @type t :: %__MODULE__{name: String.t()}
+end
+
+defmodule GraphEdge do
+  defstruct [:from, :to]
+  @type t :: %__MODULE__{from: String.t(), to: String.t()}
+end
+
+defmodule Graph do
+  defstruct nodes: MapSet.new(), edges: []
+  @type t :: %__MODULE__{nodes: MapSet.t(GraphNode.t()), edges: list(GraphEdge.t())}
+
+  defp add_node(graph, name) do
+    new_nodes = graph.nodes |> MapSet.put(%GraphNode{name: name})
+    %Graph{nodes: new_nodes, edges: graph.edges}
+  end
+
+  def add_edge(graph, from, to) do
+    graph = graph |> add_node(from) |> add_node(to)
+
+    new_edges = [%GraphEdge{from: from, to: to} | graph.edges]
+    %Graph{nodes: graph.nodes, edges: new_edges}
+  end
+end
+
 defmodule ObsidianParse do
   def read_file(path) do
     case File.read(path) do
@@ -32,37 +59,27 @@ defmodule ObsidianParse do
 
   def get_links(document) do
     document[MDEx.WikiLink]
+    |> case do
+      nil -> nil
+      links -> Enum.map(links, fn link -> link.url end)
+    end
   end
 
-  def main(content) do
-    content
-    |> parse_content
-    |> get_links
-  end
-end
+  def build_graph(paths) do
+    Enum.reduce(paths, %Graph{}, fn path, graph ->
+      name = Path.basename(path, ".md")
+      outgoing_links = path |> read_file |> parse_content |> get_links
 
-defmodule GraphNode do
-  defstruct [:name]
-  @type t :: %__MODULE__{name: String.t()}
-end
+      case outgoing_links do
+        nil ->
+          graph
 
-defmodule GraphEdge do
-  defstruct [:from, :to]
-  @type t :: %__MODULE__{from: String.t(), to: String.t()}
-end
-
-defmodule Graph do
-  defstruct nodes: [], edges: []
-  @type t :: %__MODULE__{nodes: list(GraphNode.t()), edges: list(GraphEdge.t())}
-
-  def add_node(graph, name) do
-    new_node = %GraphNode{name: name}
-    %Graph{nodes: [new_node | graph.nodes], edges: graph.edges}
-  end
-
-  def add_edge(graph, from, to) do
-    new_edge = %GraphEdge{from: from, to: to}
-    %Graph{nodes: graph.nodes, edges: [new_edge | graph.edges]}
+        outgoing_links ->
+          Enum.reduce(outgoing_links, graph, fn link, acc_graph ->
+            Graph.add_edge(acc_graph, name, link)
+          end)
+      end
+    end)
   end
 end
 
@@ -80,28 +97,11 @@ defmodule Main do
       System.halt(1)
     end
 
-    ########################################
-    # exploring the graph abstraction
-    ########################################
-
-    graph = %Graph{}
-
-    graph = graph |> Graph.add_node("new node!")
-    graph = graph |> Graph.add_node("another one")
-    graph = graph |> Graph.add_edge("new node!", "another one")
+    graph =
+      Path.wildcard("#{path}/**/*.md")
+      |> ObsidianParse.build_graph()
 
     IO.inspect(graph)
-
-    ########################################
-    # parsing files
-    ########################################
-
-    Path.wildcard("#{path}/**/*.md")
-    |> Enum.map(&ObsidianParse.read_file/1)
-    |> Enum.map(&ObsidianParse.parse_content/1)
-    |> Enum.map(&ObsidianParse.get_links/1)
-    |> Enum.reject(&is_nil/1)
-    |> IO.inspect()
   end
 end
 
