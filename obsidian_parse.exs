@@ -18,16 +18,29 @@ defmodule Graph do
   defstruct nodes: MapSet.new(), edges: []
   @type t :: %__MODULE__{nodes: MapSet.t(GraphNode.t()), edges: list(GraphEdge.t())}
 
-  defp add_node(graph, name) do
+  def add_node(graph, name) do
     new_nodes = graph.nodes |> MapSet.put(%GraphNode{name: name})
     %Graph{nodes: new_nodes, edges: graph.edges}
   end
 
-  def add_edge(graph, from, to) do
-    graph = graph |> add_node(from) |> add_node(to)
+  def add_nodes(graph, names_list) do
+    new_nodes =
+      names_list
+      |> Enum.map(&%GraphNode{name: &1})
+      |> MapSet.new()
+      |> MapSet.union(graph.nodes)
 
+    %Graph{nodes: new_nodes, edges: graph.edges}
+  end
+
+  def add_edge(graph, from, to) do
     new_edges = [%GraphEdge{from: from, to: to} | graph.edges]
     %Graph{nodes: graph.nodes, edges: new_edges}
+  end
+
+  def add_edges(graph, from, to_list) do
+    new_edges = Enum.map(to_list, &%GraphEdge{from: from, to: &1})
+    %Graph{nodes: graph.nodes, edges: new_edges ++ graph.edges}
   end
 end
 
@@ -57,35 +70,33 @@ defmodule ObsidianParse do
     )
   end
 
-  def get_links(document) do
+  def extract_links(document) do
     document[MDEx.WikiLink]
     |> case do
-      nil -> nil
+      nil -> []
       links -> Enum.map(links, fn link -> link.url end)
     end
   end
 
-  def build_graph(paths) do
-    Enum.reduce(paths, %Graph{}, fn path, graph ->
-      name = Path.basename(path, ".md")
-      outgoing_links = path |> read_file |> parse_content |> get_links
+  defp visit_file(path, graph) do
+    name = Path.basename(path, ".md")
+    outgoing_links = path |> read_file |> parse_content |> extract_links
 
-      case outgoing_links do
-        nil ->
-          graph
+    graph
+    |> Graph.add_nodes([name | outgoing_links])
+    |> Graph.add_edges(name, outgoing_links)
+  end
 
-        outgoing_links ->
-          Enum.reduce(outgoing_links, graph, fn link, acc_graph ->
-            Graph.add_edge(acc_graph, name, link)
-          end)
-      end
-    end)
+  def build_graph(directory_path) do
+    paths = Path.wildcard("#{directory_path}/**/*.md")
+
+    Enum.reduce(paths, %Graph{}, &visit_file/2)
   end
 end
 
 defmodule Main do
   def main() do
-    if Enum.count(System.argv()) != 1 do
+    if System.argv() |> Enum.count() != 1 do
       IO.puts("Pass one argument")
       System.halt(1)
     end
@@ -97,11 +108,9 @@ defmodule Main do
       System.halt(1)
     end
 
-    graph =
-      Path.wildcard("#{path}/**/*.md")
-      |> ObsidianParse.build_graph()
+    graph = ObsidianParse.build_graph(path)
 
-    IO.inspect(graph)
+    graph |> IO.inspect()
   end
 end
 
