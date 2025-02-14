@@ -71,11 +71,9 @@ defmodule ObsidianParse do
   end
 
   def extract_links(document) do
-    document[MDEx.WikiLink]
-    |> case do
-      nil -> []
-      links -> Enum.map(links, fn link -> link.url end)
-    end
+    document
+    |> Access.get(MDEx.WikiLink, [])
+    |> Enum.map(fn link -> link.url end)
   end
 
   defp visit_file(path, graph) do
